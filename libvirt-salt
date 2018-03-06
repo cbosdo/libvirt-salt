@@ -1,0 +1,120 @@
+#!/usr/bin/python
+
+import atexit
+import libvirt
+import salt.client
+import sys
+import threading
+
+try:
+    from urlparse import urlparse
+except:
+    from urllib.parse import urlparse
+
+def domEventToString(event):
+    domEventStrings = ("defined",
+                       "undefined",
+                       "started",
+                       "suspended",
+                       "resumed",
+                       "stopped",
+                       "shutdown",
+                       "pmsuspended",
+                       "crashed",
+    )
+    return domEventStrings[event]
+
+def domDetailToString(event, detail):
+    domEventStrings = (
+        ( "added", "updated" ),
+        ( "removed", ),
+        ( "booted", "migrated", "restored", "snapshot", "wakeup" ),
+        ( "paused", "migrated", "ioerror", "watchdog", "restored", "snapshot", "api error" ),
+        ( "unpaused", "migrated", "snapshot" ),
+        ( "shutdown", "destroyed", "crashed", "migrated", "saved", "failed", "snapshot"),
+        ( "finished", "on guest request", "on host request"),
+        ( "memory", "disk" ),
+        ( "panicked", ),
+        )
+    return domEventStrings[event][detail]
+
+def saltSendEvent(conn, objectName, event, data):
+    caller = salt.client.Caller()
+    uri = urlparse(conn.getURI())
+    uri_tag = [uri.scheme]
+    if len(uri.netloc) > 0:
+        uri_tag.append(uri.netloc)
+    path = uri.path.strip('/')
+    if len(path) > 0:
+        uri_tag.append(path)
+    uriStr = "/".join(uri_tag)
+
+    # Append some common data
+    all_data = {
+        'uri': conn.getURI()
+    }
+    all_data.update(data)
+
+    caller.sminion.functions['event.send'](
+        'libvirt/%s/%s/%s' % (uriStr, objectName, event),
+        all_data
+    )
+
+
+def domainEventCallback (conn, dom, event, detail, opaque):
+    eventStr = domEventToString(event)
+    detailStr = domDetailToString(event, detail)
+    saltSendEvent(conn, dom.name(), eventStr,
+        {
+            'domain': {
+                'name': dom.name(),
+                'id': dom.ID()
+            },
+            'event': eventStr,
+            'detail': detailStr
+        }
+    )
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Converts libvirt events to Salt ones")
+    parser.add_argument("URI", nargs="?", default="qemu:///system",
+                        help="libvirt daemon URI")
+
+    try:
+        args = parser.parse_args()
+        print("Connecting to %s" % args.URI)
+
+        libvirt.virEventRegisterDefaultImpl()
+
+        cnx = libvirt.openReadOnly(args.URI)
+
+        def cleanup():
+            print("closing %s" % cnx.getURI())
+            cnx.close()
+
+        atexit.register(cleanup)
+
+        domcallbacks = []
+        domcallbacks.append(cnx.domainEventRegisterAny(None,
+                                                       libvirt.VIR_DOMAIN_EVENT_ID_LIFECYCLE,
+                                                       domainEventCallback,
+                                                       None))
+
+        # TODO Add more callbacks
+
+        def callbacksCleanup():
+            for callbackId in domcallbacks:
+                cnx.domainEventDeregisterAny(callbackId)
+
+        atexit.register(callbacksCleanup)
+
+        while True:
+            libvirt.virEventRunDefaultImpl()
+
+        sys.exit(0)
+    except KeyboardInterrupt:
+        sys.exit(0)
+
+if __name__ == '__main__':
+    main()
