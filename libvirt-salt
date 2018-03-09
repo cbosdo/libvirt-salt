@@ -5,38 +5,56 @@ import libvirt
 import salt.client
 import sys
 import threading
-
 try:
     from urlparse import urlparse
 except:
     from urllib.parse import urlparse
 
-def domEventToString(event):
-    domEventStrings = ("defined",
-                       "undefined",
-                       "started",
-                       "suspended",
-                       "resumed",
-                       "stopped",
-                       "shutdown",
-                       "pmsuspended",
-                       "crashed",
-    )
-    return domEventStrings[event]
+def nth(stack, index, default=None):
+    try:
+        return stack[index]
+    except IndexError:
+        return default
 
-def domDetailToString(event, detail):
-    domEventStrings = (
-        ( "added", "updated" ),
-        ( "removed", ),
-        ( "booted", "migrated", "restored", "snapshot", "wakeup" ),
-        ( "paused", "migrated", "ioerror", "watchdog", "restored", "snapshot", "api error" ),
-        ( "unpaused", "migrated", "snapshot" ),
-        ( "shutdown", "destroyed", "crashed", "migrated", "saved", "failed", "snapshot"),
-        ( "finished", "on guest request", "on host request"),
-        ( "memory", "disk" ),
-        ( "panicked", ),
-        )
-    return domEventStrings[event][detail]
+domain_events_map = (
+    ( 'defined', ( "added",
+                   "updated",
+                   "renamed",
+                   "from snapshot" ) ),
+    ( 'undefined', ( "removed",
+                     "renamed" ) ),
+    ( 'started', ( "booted",
+                   "migrated",
+                   "restored",
+                   "snapshot",
+                   "wakeup" ) ),
+    ( 'suspended', ( "paused",
+                     "migrated",
+                     "ioerror",
+                     "watchdog",
+                     "restored",
+                     "snapshot",
+                     "api error",
+                     "postcopy",
+                     "postcopy failed" ) ),
+    ( 'resumed', ( "unpaused",
+                   "migrated",
+                   "snapshot",
+                   "postcopy" ) ),
+    ( 'stopped', ( "shutdown",
+                   "destroyed",
+                   "crashed",
+                   "migrated",
+                   "saved",
+                   "failed",
+                   "snapshot" ) ),
+    ( 'shutdown', ( "finished",
+                    "on guest request",
+                    "on host request" ) ),
+    ( 'pmsuspended', ( "memory",
+                       "disk" ) ),
+    ( 'crashed', ( "panicked" ) )
+)
 
 def saltSendEvent(conn, objectName, event, data):
     caller = salt.client.Caller()
@@ -62,8 +80,8 @@ def saltSendEvent(conn, objectName, event, data):
 
 
 def domainEventCallback (conn, dom, event, detail, opaque):
-    eventStr = domEventToString(event)
-    detailStr = domDetailToString(event, detail)
+    eventStr, details = nth(domain_events_map, event, ('unknown', {}))
+    detailStr = nth(details, detail, 'unknown')
     saltSendEvent(conn, dom.name(), eventStr,
         {
             'domain': {
