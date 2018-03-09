@@ -356,6 +356,60 @@ def networkEventLifecycleCallback(conn, net, event, detail, opaque):
     })
 
 
+def storagePoolEventLifecycleCallback(conn, pool, event, detail, opaque):
+    events = ( 'defined', 'undefined', 'started', 'stopped', 'created', 'deleted' )
+    details = ( )  # Unused so far
+
+    saltSendEvent(opaque, conn, {
+        'pool': pool.name(),
+        'event': nth(events, event, 'unknown'),
+        'detail': nth(details, detail, 'unknown'),
+    })
+
+
+def storagePoolEventRefreshCallback(conn, pool, opaque):
+    saltSendEvent(opaque, conn, {
+        'pool': pool.name(),
+        'event': opaque['event']
+    })
+
+
+def nodeDeviceEventLifecycleCallback(conn, dev, event, detail, opaque):
+    events = ( 'created', 'deleted' )
+    details = ( )  # Unused so far
+
+    saltSendEvent(opaque, conn, {
+        'nodedev': dev.name(),
+        'event': nth(events, event, 'unknown'),
+        'detail': nth(details, detail, 'unknown'),
+    })
+
+
+def nodeDeviceEventUpdateCallback(conn, dev, opaque):
+    saltSendEvent(opaque, conn, {
+        'nodedev': dev.name(),
+        'event': opaque['event']
+    })
+
+
+def secretEventLifecycleCallback(conn, secret, event, detail, opaque):
+    events = ( 'defined', 'undefined' )
+    details = ( )  # Unused so far
+
+    saltSendEvent(opaque, conn, {
+        'secret' : secret.UUIDString(),
+        'event': nth(events, event, 'unknown'),
+        'detail': nth(details, detail, 'unknown'),
+    })
+
+
+def secretEventValueChanged(conn, secret, opaque):
+    saltSendEvent(opaque, conn, {
+        'secret' : secret.UUIDString(),
+        'event': opaque['event']
+    })
+
+
 def start(uri="qemu:///system",
           tag_prefix="salt/engines/libvirt_events",
           filters=["all"]):
@@ -381,6 +435,21 @@ def start(uri="qemu:///system",
                 'callbacks': { },
                 'register': 'networkEventRegisterAny',
                 'deregister': 'networkEventDeregisterAny'
+            },
+            'pool': {
+                'callbacks': { },
+                'register': 'storagePoolEventRegisterAny',
+                'deregister': 'storagePoolEventDeregisterAny',
+            },
+            'nodedev': {
+                'callbacks': { },
+                'register': 'nodeDeviceEventRegisterAny',
+                'deregister': 'nodeDeviceEventDeregisterAny',
+            },
+            'secret': {
+                'callbacks': { },
+                'register': 'secretEventRegisterAny',
+                'deregister': 'secretEventDeregisterAny',
             }
         }
 
@@ -395,6 +464,7 @@ def start(uri="qemu:///system",
             except AttributeError:
                 log.warn('Skip "%s/%s" events: libvirt too old' % (obj, event))
 
+        # Domain callbacks
         addCallback('domain', 'lifecycle',
                     'VIR_DOMAIN_EVENT_ID_LIFECYCLE',
                     domainEventLifecycleCallback)
@@ -479,12 +549,37 @@ def start(uri="qemu:///system",
                     'VIR_DOMAIN_EVENT_ID_BLOCK_THRESHOLD',
                     domainEventBlockThresholdCallback)
 
+        # Network callbacks
         addCallback('network', 'lifecycle',
                     'VIR_NETWORK_EVENT_ID_LIFECYCLE',
                     networkEventLifecycleCallback)
 
-        # TODO Add more callbacks
+        # Pool callbacks
+        addCallback('pool', 'lifecycle',
+                    'VIR_STORAGE_POOL_EVENT_ID_LIFECYCLE',
+                    storagePoolEventLifecycleCallback)
 
+        addCallback('pool', 'refresh',
+                    'VIR_STORAGE_POOL_EVENT_ID_REFRESH',
+                    storagePoolEventRefreshCallback)
+
+        # Node device callbacks
+        addCallback('nodedev', 'lifecycle',
+                    'VIR_NODE_DEVICE_EVENT_ID_LIFECYCLE',
+                    nodeDeviceEventLifecycleCallback)
+
+        addCallback('nodedev', 'update',
+                    'VIR_NODE_DEVICE_EVENT_ID_UPDATE',
+                    nodeDeviceEventUpdateCallback)
+
+        # Secret callbacks
+        addCallback('secret', 'lifecycle',
+                    'VIR_SECRET_EVENT_ID_LIFECYCLE',
+                    secretEventLifecycleCallback)
+
+        addCallback('secret', 'value changed',
+                    'VIR_SECRET_EVENT_ID_VALUE_CHANGED',
+                    secretEventValueChangedCallback)
 
         callbackIds = {}
         allFilters = "all" in filters
